@@ -148,8 +148,14 @@ before running a destructive version of it:
 
 ```php
 Balena::devices()->inFleet('myorg/myfleet')->toUrl();
-// https://api.balena-cloud.com/v7/device?$filter=belongs_to__application/any(a:a/slug eq 'myorg/myfleet')
+// https://api.balena-cloud.com/v7/device?$filter=belongs_to__application/any(a:a/slug%20eq%20'myorg%2Fmyfleet')
 ```
+
+Query URLs preserve OData separators, including commas in `$select` and nested
+options in `$expand`. Spaces and literal contents are URL-encoded; apostrophes
+inside strings are doubled using OData escaping. Pass original values to the
+builder, and unencoded OData expressions to `whereRaw()` or the client's query
+options, rather than pre-encoding them.
 
 ## Writes
 
