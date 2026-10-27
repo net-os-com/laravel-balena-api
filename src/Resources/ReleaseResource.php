@@ -50,16 +50,35 @@ class ReleaseResource extends Resource
     }
 
     /**
-     * The newest successful, finalised release for a fleet — what a device
-     * tracking that fleet would run.
+     * The newest release of a fleet that built successfully and has not been
+     * invalidated.
+     *
+     * Filters only on documented fields. For what the fleet will actually hand
+     * its devices, prefer FleetResource::trackedRelease(), which reads the
+     * fleet's own should_be_running__release.
+     */
+    public function latestSuccessful(int|string $fleet): ?Release
+    {
+        /** @var Release|null */
+        return $this->forFleet($fleet)
+            ->where('status', 'success')
+            ->where('is_invalidated', false)
+            ->orderByDesc('created_at')
+            ->first();
+    }
+
+    /**
+     * As latestSuccessful(), excluding pre-releases.
      */
     public function latestFinal(int|string $fleet): ?Release
     {
         /** @var Release|null */
         return $this->forFleet($fleet)
             ->where('status', 'success')
-            ->where('is_final', true)
             ->where('is_invalidated', false)
+            ->where(fn (PineQuery $query): PineQuery => $query
+                ->whereNull('semver_prerelease')
+                ->orWhere('semver_prerelease', ''))
             ->orderByDesc('created_at')
             ->first();
     }

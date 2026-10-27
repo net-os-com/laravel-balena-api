@@ -130,6 +130,134 @@ this package does not map are never lost:
 $device->raw['cpu_temp'] ?? null;
 ```
 
+## Device status and health
+
+`overall_status` — the value the dashboard shows — is returned **only when a
+query selects it by name**. A plain `get()` leaves it `null`, which reads like
+"no status" rather than "you didn't ask". `withStatus()` selects it along with
+the rest of the health fields:
+
+```php
+$devices = Balena::devices()->withStatus()->get();
+
+$device->overallStatus;       // 'Operational' | 'Reduced Functionality' | 'Disconnected'
+                              // | 'Configuring' | 'Updating' | 'Post Provisioning'
+                              // | 'Inactive' | 'Frozen'
+$device->isOperational();     // bool, or null if overall_status wasn't selected
+$device->apiHeartbeatState;
+$device->isConnectedToVpn;
+$device->downloadProgress;
+$device->cpuUsage; $device->cpuTemp;
+$device->memoryUsage; $device->memoryTotal;
+$device->storageUsage; $device->storageTotal;
+$device->isUndervolted;
+```
+
+The field list is public, so it composes with the other scopes in either order:
+
+```php
+Balena::devices()->withStatus()->where('is_online', false)->get();
+Balena::devices()->inFleet('org/fleet')->select(...DeviceResource::STATUS_FIELDS)->get();
+```
+
+`statusInFleet()` adds the running and target releases, so a pending update is
+visible in the same request:
+
+```php
+foreach (Balena::devices()->statusInFleet('myorg/myfleet')->get() as $device) {
+    $pending = $device->hasPendingUpdate();   // null when a release was not expanded
+}
+```
+
+### The whole device at once
+
+`withStatus()` is deliberately narrow — it carries what changes minute to
+minute. When you want the rest as well (host OS, OS variant, supervisor
+version, IP and MAC, public address, note, the running, target and pinned
+releases, and the device's tags), use `withDetails()`:
+
+```php
+$device = Balena::devices()->detailsByUuid($uuid);
+
+$device->osVersion;              // 'balenaOS 2.115.18+rev1'
+$device->osVariant;              // 'prod'
+$device->supervisorVersion;      // '14.11.19'
+$device->ipAddress;              // '192.168.1.44'
+$device->macAddress;
+$device->publicAddress;
+$device->note;
+
+$device->runningRelease()?->rawVersion;
+$device->targetRelease()?->rawVersion;
+$device->pinnedRelease()?->commit;
+$device->hasPendingUpdate();     // true when running !== target, null if unknown
+
+$device->tags();                 // ['location' => 'amsterdam', 'role' => 'kiosk']
+$device->tag('location');        // 'amsterdam'
+```
+
+Same thing per fleet, or composed with any filter:
+
+```php
+Balena::devices()->detailsInFleet('myorg/myfleet')->get();
+Balena::devices()->withDetails()->where('is_online', false)->get();
+```
+
+Tags come back expanded on the device, so there is no second request. Writing
+them still goes through the tag resource: `Balena::deviceTags()->set($id, …)`.
+
+`withDetails()` is a heavier query than `withStatus()` — prefer the narrow one
+for polling, and this one for a device detail page.
+
+## Per-device errors
+
+balena has no error field. The resource API carries no error text, and
+`service_install` has no status, so **per-service state is not queryable in
+bulk** — it comes from the device's own supervisor, one call per device, and
+only while the device is online.
+
+```php
+$state = Balena::devices()->state($uuid);   // DeviceState
+
+$state->updateStatus();     // 'Done' | 'Downloading' | 'Downloaded'
+                            // | 'Applying Changes' | 'Rejected' | 'Aborted'
+$state->isFailing();        // true for Rejected or Aborted
+$state->isUpdating();
+$state->stalledServices();  // services neither running nor mid-transition
+```
+
+`Rejected` is the clearest failure: a required service in the target release
+doesn't meet the requirements to run. `Aborted` means the supervisor gave up.
+Comparisons are case-insensitive, because balena's docs give these names
+capitalised while the supervisor returns them lower-cased.
+
+Per service:
+
+```php
+foreach ($state->services() as $service) {
+    $service->name;
+    $service->status;            // 'Running', 'Downloading', 'Installing', ...
+    $service->downloadProgress;
+    $service->isRunning();
+    $service->isSettling();      // mid-transition rather than stuck
+}
+```
+
+To check whether a device has finished applying its target state:
+
+```php
+Balena::devices()->hasSettled($uuid);              // bool
+Balena::devices()->supervisorStatus($uuid)->appState;   // 'applying' | 'applied'
+```
+
+That endpoint also returns a top-level `status` field which this package
+deliberately does not expose: balena documents that it reports the HTTP
+response and "does not indicate the status of the device itself". It is still
+reachable on `->raw` if you need it.
+
+`state()` needs supervisor 7.12 or later, and 17.7.0 for `updateStatus`.
+`hasSettled()` needs 9.7 or later.
+
 ### Paging
 
 ```php
@@ -200,8 +328,15 @@ Balena::fleets()->inOrganization(3)->get();
 
 Balena::releases()->forFleet('myorg/myfleet')->get();
 Balena::releases()->byCommit('abc123...');
-Balena::releases()->latestFinal('myorg/myfleet');
+Balena::releases()->latestSuccessful('myorg/myfleet');  // newest built + not invalidated
+Balena::releases()->latestFinal('myorg/myfleet');       // the same, excluding pre-releases
+
+Balena::fleets()->trackedRelease('myorg/myfleet');      // what tracking devices will run
 ```
+
+`trackedRelease()` reads the fleet's own `should_be_running__release` and is the
+precise answer to "what will devices get"; the `latest*` helpers are a search
+over the release list.
 
 ## Variables and tags
 

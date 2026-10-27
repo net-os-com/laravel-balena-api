@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace NetOs\Balena\Resources;
 
 use NetOs\Balena\Data\Fleet;
+use NetOs\Balena\Data\Release;
 use NetOs\Balena\Query\PineQuery;
 
 /**
@@ -43,6 +44,22 @@ class FleetResource extends Resource
     {
         /** @var Fleet|null */
         return $this->query()->where('app_name', $name)->first();
+    }
+
+    /**
+     * The release this fleet hands to devices that track it.
+     */
+    public function trackedRelease(int|string $fleet): ?Release
+    {
+        $query = is_int($fleet) || ctype_digit($fleet)
+            ? $this->query()->where('id', (int) $fleet)
+            : $this->query()->where('slug', $fleet);
+
+        $found = $query->select('id')->expand('should_be_running__release')->first();
+
+        return $found instanceof Fleet
+            ? $found->trackedRelease()
+            : null;
     }
 
     /**

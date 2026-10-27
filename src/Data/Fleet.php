@@ -47,6 +47,17 @@ final readonly class Fleet
     }
 
     /**
+     * The release this fleet hands to tracking devices, when
+     * should_be_running__release was expanded.
+     */
+    public function trackedRelease(): ?Release
+    {
+        $expanded = Cast::expanded($this->raw['should_be_running__release'] ?? null);
+
+        return $expanded === null ? null : Release::fromArray($expanded);
+    }
+
+    /**
      * The device type, when is_for__device_type was expanded.
      */
     public function deviceType(): ?DeviceType
