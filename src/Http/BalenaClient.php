@@ -212,9 +212,9 @@ class BalenaClient
     }
 
     /**
-     * OData parameter names must reach balena as literal `$filter`, `$select`
-     * and so on, so the query string is assembled by hand rather than through
-     * http_build_query, which would percent-encode the leading `$`.
+     * Balena parses OData syntax before decoding literal values. Keep option
+     * names and expression punctuation literal, while encoding data and spaces.
+     * Inputs are unencoded OData expressions (as produced by PineQuery).
      *
      * @param  array<string, string|int>  $query
      */
@@ -227,10 +227,49 @@ class BalenaClient
         $parts = [];
 
         foreach ($query as $key => $value) {
-            $parts[] = $key.'='.rawurlencode((string) $value);
+            $name = str_replace('%24', '$', rawurlencode($key));
+            $encoded = in_array($key, ['$select', '$filter', '$expand', '$orderby'], true)
+                ? $this->encodeExpression((string) $value)
+                : rawurlencode((string) $value);
+
+            $parts[] = $name.'='.$encoded;
         }
 
         return '?'.implode('&', $parts);
+    }
+
+    /**
+     * Preserve grammar only outside single-quoted literals. Doubled apostrophes
+     * are OData's escape sequence: splitting on each quote leaves an empty
+     * outside segment between them, so literal contents stay encoded.
+     *
+     * Never decode existing percent sequences: a literal "%26" must remain
+     * data, rather than becoming a query separator after decoding at the API.
+     */
+    private function encodeExpression(string $expression): string
+    {
+        $segments = explode("'", $expression);
+
+        foreach ($segments as $index => $segment) {
+            $segments[$index] = rawurlencode($segment);
+
+            if ($index % 2 === 0) {
+                $segments[$index] = strtr($segments[$index], [
+                    '%24' => '$',
+                    '%2C' => ',',
+                    '%28' => '(',
+                    '%29' => ')',
+                    '%2F' => '/',
+                    '%3A' => ':',
+                    '%3B' => ';',
+                    '%3D' => '=',
+                    '%2A' => '*',
+                    '%40' => '@',
+                ]);
+            }
+        }
+
+        return implode("'", $segments);
     }
 
     private function exceptionFor(Response $response, string $url): BalenaException
