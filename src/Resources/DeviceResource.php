@@ -97,6 +97,18 @@ class DeviceResource extends Resource
         'created_at',
     ];
 
+    /**
+     * What to select on an expanded variable: a name, a value, and the id you
+     * need to address the row again.
+     *
+     * @var list<string>
+     */
+    public const VARIABLE_FIELDS = [
+        'id',
+        'name',
+        'value',
+    ];
+
     public function resourceName(): string
     {
         return 'device';
@@ -153,7 +165,7 @@ class DeviceResource extends Resource
     /**
      * Everything this package maps about a device, in one request: the status
      * and health fields, the host, network and note fields, the running,
-     * target and pinned releases, and the device's tags.
+     * target and pinned releases, the device's tags and its variables.
      *
      * Pine returns only the fields a query names, so anything left unselected
      * arrives as null and reads like missing data. This scope is the answer
@@ -180,11 +192,32 @@ class DeviceResource extends Resource
 
     /**
      * Devices in a fleet, fully populated. The bulk counterpart of
-     * detailsByUuid(), and a heavier query than statusInFleet().
+     * detailsByUuid(), and a much heavier query than statusInFleet(): every
+     * tag and every variable of every device comes back with it.
      */
     public function detailsInFleet(int|string $fleet): PineQuery
     {
         return $this->detailsOn($this->inFleet($fleet));
+    }
+
+    /**
+     * A device's own variables alongside the device, in one request: the
+     * environment, configuration and per-service variables the dashboard
+     * shows under Variables.
+     *
+     *   $device = Balena::devices()->withVariables()->where('uuid', $uuid)->first();
+     *   $device->environmentVariables();
+     *   $device->configVariable('BALENA_HOST_CONFIG_gpu_mem');
+     *   $device->serviceVariable('mqtt', 'BROKER_URL');
+     *
+     * Only variables set on the device itself. balena keeps fleet-wide values
+     * on the fleet and lets a device override them, so a device with no
+     * variables of its own still runs with the fleet's. withDetails() already
+     * includes these; this scope is for when the variables are all you want.
+     */
+    public function withVariables(): PineQuery
+    {
+        return $this->variablesOn($this->query());
     }
 
     /**
@@ -218,12 +251,32 @@ class DeviceResource extends Resource
      */
     private function detailsOn(PineQuery $query): PineQuery
     {
+        return $this->variablesOn(
+            $query
+                ->select(...self::STATUS_FIELDS, ...self::DETAIL_FIELDS)
+                ->expand('is_running__release', fn (PineQuery $release): PineQuery => $release->select(...self::RELEASE_FIELDS))
+                ->expand('should_be_running__release', fn (PineQuery $release): PineQuery => $release->select(...self::RELEASE_FIELDS))
+                ->expand('is_pinned_on__release', fn (PineQuery $release): PineQuery => $release->select(...self::RELEASE_FIELDS))
+                ->expand('device_tag', fn (PineQuery $tag): PineQuery => $tag->select('tag_key', 'value'))
+        );
+    }
+
+    /**
+     * Expand the three variable relations that hang off a device.
+     *
+     * The service expand inside the third one is what lets the variables be
+     * keyed by service name rather than by service id: balena identifies a
+     * device service variable by device, service and name, and the service
+     * link carries nothing but the id until it is expanded.
+     */
+    private function variablesOn(PineQuery $query): PineQuery
+    {
         return $query
-            ->select(...self::STATUS_FIELDS, ...self::DETAIL_FIELDS)
-            ->expand('is_running__release', fn (PineQuery $release): PineQuery => $release->select(...self::RELEASE_FIELDS))
-            ->expand('should_be_running__release', fn (PineQuery $release): PineQuery => $release->select(...self::RELEASE_FIELDS))
-            ->expand('is_pinned_on__release', fn (PineQuery $release): PineQuery => $release->select(...self::RELEASE_FIELDS))
-            ->expand('device_tag', fn (PineQuery $tag): PineQuery => $tag->select('tag_key', 'value'));
+            ->expand('device_environment_variable', fn (PineQuery $variable): PineQuery => $variable->select(...self::VARIABLE_FIELDS))
+            ->expand('device_config_variable', fn (PineQuery $variable): PineQuery => $variable->select(...self::VARIABLE_FIELDS))
+            ->expand('device_service_environment_variable', fn (PineQuery $variable): PineQuery => $variable
+                ->select(...self::VARIABLE_FIELDS)
+                ->expand('service', fn (PineQuery $service): PineQuery => $service->select('id', 'service_name')));
     }
 
     // ----------------------------------------------------------------- writes

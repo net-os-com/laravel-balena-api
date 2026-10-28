@@ -61,6 +61,13 @@ final class Cast
             return (int) $value;
         }
 
+        // An unexpanded to-one link comes back as {"__id": 1234}, not as a
+        // bare number, so reading only "id" would miss every link the query
+        // did not expand.
+        if (is_array($value) && isset($value['__id'])) {
+            return self::int($value['__id']);
+        }
+
         $expanded = self::expanded($value);
 
         return $expanded === null ? null : self::int($expanded['id'] ?? null);

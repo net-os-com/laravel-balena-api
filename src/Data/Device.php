@@ -191,20 +191,9 @@ final readonly class Device
      */
     public function tags(): array
     {
-        $rows = $this->raw['device_tag'] ?? null;
-
-        if (! is_array($rows)) {
-            return [];
-        }
-
         $tags = [];
 
-        foreach ($rows as $row) {
-            if (! is_array($row)) {
-                continue;
-            }
-
-            /** @var array<string, mixed> $row */
+        foreach ($this->rows('device_tag') as $row) {
             $tag = Tag::fromArray($row);
 
             if ($tag->key !== null) {
@@ -218,5 +207,143 @@ final readonly class Device
     public function tag(string $key): ?string
     {
         return $this->tags()[$key] ?? null;
+    }
+
+    /**
+     * The environment variables set on this device, keyed by name, when
+     * device_environment_variable was expanded.
+     *
+     * These are the device's own variables. A value the device inherits from
+     * its fleet lives on the fleet and is not repeated here, so an empty
+     * array does not mean the running container sees no environment.
+     *
+     * @return array<string, string|null>
+     */
+    public function environmentVariables(): array
+    {
+        return $this->variables('device_environment_variable');
+    }
+
+    public function environmentVariable(string $name): ?string
+    {
+        return $this->environmentVariables()[$name] ?? null;
+    }
+
+    /**
+     * The configuration variables set on this device, keyed by name, when
+     * device_config_variable was expanded. These are the RESIN_ and BALENA_
+     * settings the supervisor reads.
+     *
+     * @return array<string, string|null>
+     */
+    public function configVariables(): array
+    {
+        return $this->variables('device_config_variable');
+    }
+
+    public function configVariable(string $name): ?string
+    {
+        return $this->configVariables()[$name] ?? null;
+    }
+
+    /**
+     * The per-service variables set on this device, keyed by service name and
+     * then by variable name, when device_service_environment_variable was
+     * expanded.
+     *
+     * A row whose service link was not expanded alongside it is keyed by the
+     * service id as a string, so shaping the expand yourself narrows what you
+     * can read rather than silently dropping variables.
+     *
+     * @return array<string, array<string, string|null>>
+     */
+    public function serviceVariables(): array
+    {
+        $services = [];
+
+        foreach ($this->rows('device_service_environment_variable') as $row) {
+            $variable = Variable::fromArray($row);
+
+            if ($variable->name !== null) {
+                $services[$this->serviceKey($row)][$variable->name] = $variable->value;
+            }
+        }
+
+        return $services;
+    }
+
+    public function serviceVariable(string $service, string $name): ?string
+    {
+        return $this->serviceVariables()[$service][$name] ?? null;
+    }
+
+    /**
+     * The name/value pairs of an expanded variable relation.
+     *
+     * @return array<string, string|null>
+     */
+    private function variables(string $relation): array
+    {
+        $pairs = [];
+
+        foreach ($this->rows($relation) as $row) {
+            $variable = Variable::fromArray($row);
+
+            if ($variable->name !== null) {
+                $pairs[$variable->name] = $variable->value;
+            }
+        }
+
+        return $pairs;
+    }
+
+    /**
+     * The service a variable row belongs to: its name when the link was
+     * expanded, its id otherwise.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    private function serviceKey(array $row): string
+    {
+        $service = $row['service'] ?? null;
+        $expanded = Cast::expanded($service);
+        $name = $expanded === null ? null : Cast::string($expanded['service_name'] ?? null);
+
+        if ($name !== null) {
+            return $name;
+        }
+
+        $id = Cast::relationId($service);
+
+        return $id === null ? '' : (string) $id;
+    }
+
+    /**
+     * The rows of an expanded to-many relation.
+     *
+     * An empty device and an unexpanded query both give an empty list: Pine
+     * omits a relation it was not asked for rather than returning it empty,
+     * so the two are not distinguishable here.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function rows(string $relation): array
+    {
+        $rows = $this->raw[$relation] ?? null;
+
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        $found = [];
+
+        foreach ($rows as $row) {
+            if (is_array($row)) {
+                /** @var array<string, mixed> $row */
+                $found[] = $row;
+            }
+        }
+
+        return $found;
     }
 }

@@ -174,7 +174,7 @@ foreach (Balena::devices()->statusInFleet('myorg/myfleet')->get() as $device) {
 `withStatus()` is deliberately narrow — it carries what changes minute to
 minute. When you want the rest as well (host OS, OS variant, supervisor
 version, IP and MAC, public address, note, the running, target and pinned
-releases, and the device's tags), use `withDetails()`:
+releases, the device's tags and its variables), use `withDetails()`:
 
 ```php
 $device = Balena::devices()->detailsByUuid($uuid);
@@ -208,6 +208,37 @@ them still goes through the tag resource: `Balena::deviceTags()->set($id, …)`.
 
 `withDetails()` is a heavier query than `withStatus()` — prefer the narrow one
 for polling, and this one for a device detail page.
+
+### Variables on the device
+
+`withDetails()` brings the device's variables with it, and `withVariables()`
+asks for them without the rest:
+
+```php
+$device = Balena::devices()->withVariables()->where('uuid', $uuid)->first();
+
+$device->environmentVariables();   // ['API_URL' => 'https://…', 'LOG_LEVEL' => 'debug']
+$device->environmentVariable('LOG_LEVEL');
+
+$device->configVariables();        // ['BALENA_HOST_CONFIG_gpu_mem' => '128', …]
+$device->configVariable('BALENA_HOST_CONFIG_gpu_mem');
+
+$device->serviceVariables();       // ['mqtt' => ['BROKER_URL' => 'tcp://…'], 'api' => […]]
+$device->serviceVariable('mqtt', 'BROKER_URL');
+```
+
+Service variables come back keyed by service name because the expand pulls the
+service in alongside them; balena identifies a device service variable by
+device, service and name, and the service link carries only an id until it is
+expanded.
+
+Two things these do **not** cover. They are the variables set *on the device*,
+so a value the device inherits from its fleet is absent here — it lives on the
+fleet, and the device only overrides it. And an unexpanded relation and a
+device with no variables both read as an empty array, because Pine omits a
+relation it was not asked for rather than returning it empty.
+
+Writing still goes through the variable resources below.
 
 ## Per-device errors
 
@@ -356,6 +387,10 @@ Available: `deviceEnvVars()`, `deviceConfigVars()`, `deviceServiceVars()`,
 `fleetEnvVars()`, `fleetConfigVars()`, `fleetServiceVars()`. Note that device
 service variables are owned by a **service install**, not a device, and fleet
 service variables by a **service**.
+
+These are the write path, and the read path for one owner at a time. To read a
+device's variables without a request per kind, expand them onto the device
+itself — see [Variables on the device](#variables-on-the-device).
 
 Tags work the same way:
 
