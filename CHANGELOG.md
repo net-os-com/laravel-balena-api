@@ -2,6 +2,23 @@
 
 All notable changes to `:package_name` will be documented in this file.
 
+## v2.1.0 - 2026-10-28
+
+### Added
+
+- `Balena::devices()->withVariables()` expands the three variable relations balena hangs off a device — environment, configuration and per-service — so they arrive with the device instead of costing a request each. `withDetails()` and `detailsByUuid()` now carry them too.
+- `Device::environmentVariables()`, `configVariables()` and `serviceVariables()`, plus `environmentVariable()`, `configVariable()` and `serviceVariable()` for single lookups. Service variables are keyed by service name: the expand pulls the service in alongside them, because balena identifies a device service variable by device, service and name but ships the service link as a bare id until asked otherwise.
+
+These are the variables set on the device itself. A value inherited from the fleet lives on the fleet and is not repeated here, and an unexpanded relation reads the same as a device with no variables, because Pine omits a relation it was not asked for.
+
+### Fixed
+
+- `Cast::relationId()` understood a bare id and an expanded row, but not the `{"__id": N}` shape balena returns for an unexpanded to-one link. `Fleet::$deviceTypeId`, `Fleet::$organizationId`, `Release::$fleetId` and both `ServiceInstall` ids were null in practice because of it.
+
+### Note
+
+`detailsInFleet()` is now considerably heavier: every tag and every variable of every device comes back with it. `statusInFleet()` remains the query to poll.
+
 ## v2.0.0 - 2026-10-27
 
 ### Breaking
