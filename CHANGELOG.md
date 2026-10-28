@@ -2,6 +2,19 @@
 
 All notable changes to `:package_name` will be documented in this file.
 
+## v2.1.1 - 2026-10-28
+
+### Fixed
+
+- `withDetails()`, `detailsByUuid()`, `detailsInFleet()` and `withVariables()` failed against the live API with a 401 and an empty body. **Anyone on v2.1.0 should upgrade; those four scopes do not work there at all.**
+  
+  The cause: a device service variable belongs to a *service install*, not to a device, so expanding `device_service_environment_variable` straight off a device asks for a navigation balena does not have. balena answers an unknown navigation with a 401 rather than a 400, so the failure read like an expired token.
+  
+  The expand now goes through `service_install` and pulls `installs__service` in beside the variables, which is where the service name comes from. `Device::serviceVariables()` returns the same shape as before — `['mqtt' => ['BROKER_URL' => '…']]` — so nothing that reads it needs to change.
+  
+
+The regression test parses the top-level relations out of `$expand` rather than searching it for a substring, because the correct query legitimately contains `,device_service_environment_variable(` one level down.
+
 ## v2.1.0 - 2026-10-28
 
 ### Added
