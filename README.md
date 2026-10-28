@@ -227,10 +227,13 @@ $device->serviceVariables();       // ['mqtt' => ['BROKER_URL' => 'tcp://…'], 
 $device->serviceVariable('mqtt', 'BROKER_URL');
 ```
 
-Service variables come back keyed by service name because the expand pulls the
-service in alongside them; balena identifies a device service variable by
-device, service and name, and the service link carries only an id until it is
-expanded.
+Service variables are not a relation on the device: balena hangs them off a
+**service install**, the row pairing a device with one of its fleet's
+services. The expand goes through there and pulls `installs__service` in
+alongside the variables, which is where the service name to key them by comes
+from. Expanding `device_service_environment_variable` straight off a device is
+not a navigation balena has, and it answers an unknown one with a 401 and an
+empty body rather than a 400 — so that mistake reads like a bad token.
 
 Two things these do **not** cover. They are the variables set *on the device*,
 so a value the device inherits from its fleet is absent here — it lives on the

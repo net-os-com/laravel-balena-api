@@ -262,21 +262,29 @@ class DeviceResource extends Resource
     }
 
     /**
-     * Expand the three variable relations that hang off a device.
+     * Expand the variable relations that hang off a device.
      *
-     * The service expand inside the third one is what lets the variables be
-     * keyed by service name rather than by service id: balena identifies a
-     * device service variable by device, service and name, and the service
-     * link carries nothing but the id until it is expanded.
+     * Environment and configuration variables belong to the device, but a
+     * service variable belongs to a *service install* — the row pairing this
+     * device with one of its fleet's services. Expanding
+     * device_service_environment_variable straight off a device is not a
+     * relation balena has, and it answers an unknown navigation with a 401
+     * and an empty body rather than a 400, so the mistake reads like a bad
+     * token. Hence the detour through service_install.
+     *
+     * installs__service is expanded alongside the variables because that is
+     * where the service name lives; without it the install carries nothing
+     * but an id, and the variables could only be keyed by number.
      */
     private function variablesOn(PineQuery $query): PineQuery
     {
         return $query
             ->expand('device_environment_variable', fn (PineQuery $variable): PineQuery => $variable->select(...self::VARIABLE_FIELDS))
             ->expand('device_config_variable', fn (PineQuery $variable): PineQuery => $variable->select(...self::VARIABLE_FIELDS))
-            ->expand('device_service_environment_variable', fn (PineQuery $variable): PineQuery => $variable
-                ->select(...self::VARIABLE_FIELDS)
-                ->expand('service', fn (PineQuery $service): PineQuery => $service->select('id', 'service_name')));
+            ->expand('service_install', fn (PineQuery $install): PineQuery => $install
+                ->select('id')
+                ->expand('installs__service', fn (PineQuery $service): PineQuery => $service->select('id', 'service_name'))
+                ->expand('device_service_environment_variable', fn (PineQuery $variable): PineQuery => $variable->select(...self::VARIABLE_FIELDS)));
     }
 
     // ----------------------------------------------------------------- writes

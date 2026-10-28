@@ -248,12 +248,15 @@ final readonly class Device
 
     /**
      * The per-service variables set on this device, keyed by service name and
-     * then by variable name, when device_service_environment_variable was
-     * expanded.
+     * then by variable name.
      *
-     * A row whose service link was not expanded alongside it is keyed by the
-     * service id as a string, so shaping the expand yourself narrows what you
-     * can read rather than silently dropping variables.
+     * These hang off a service install rather than off the device, so they
+     * are read through an expanded service_install carrying its own
+     * device_service_environment_variable rows.
+     *
+     * An install whose installs__service was not expanded alongside it is
+     * keyed by the service id as a string, so shaping the expand yourself
+     * narrows what you can read rather than silently dropping variables.
      *
      * @return array<string, array<string, string|null>>
      */
@@ -261,11 +264,15 @@ final readonly class Device
     {
         $services = [];
 
-        foreach ($this->rows('device_service_environment_variable') as $row) {
-            $variable = Variable::fromArray($row);
+        foreach ($this->rows('service_install') as $install) {
+            $service = $this->serviceKey($install);
 
-            if ($variable->name !== null) {
-                $services[$this->serviceKey($row)][$variable->name] = $variable->value;
+            foreach ($this->rowsIn($install, 'device_service_environment_variable') as $row) {
+                $variable = Variable::fromArray($row);
+
+                if ($variable->name !== null) {
+                    $services[$service][$variable->name] = $variable->value;
+                }
             }
         }
 
@@ -298,14 +305,14 @@ final readonly class Device
     }
 
     /**
-     * The service a variable row belongs to: its name when the link was
+     * The service an install belongs to: its name when installs__service was
      * expanded, its id otherwise.
      *
-     * @param  array<string, mixed>  $row
+     * @param  array<string, mixed>  $install
      */
-    private function serviceKey(array $row): string
+    private function serviceKey(array $install): string
     {
-        $service = $row['service'] ?? null;
+        $service = $install['installs__service'] ?? null;
         $expanded = Cast::expanded($service);
         $name = $expanded === null ? null : Cast::string($expanded['service_name'] ?? null);
 
@@ -329,7 +336,19 @@ final readonly class Device
      */
     private function rows(string $relation): array
     {
-        $rows = $this->raw[$relation] ?? null;
+        return $this->rowsIn($this->raw, $relation);
+    }
+
+    /**
+     * The same, on a payload other than this device's own, so the rows nested
+     * inside an expansion read like the ones beside it.
+     *
+     * @param  array<string, mixed>  $source
+     * @return list<array<string, mixed>>
+     */
+    private function rowsIn(array $source, string $relation): array
+    {
+        $rows = $source[$relation] ?? null;
 
         if (! is_array($rows)) {
             return [];

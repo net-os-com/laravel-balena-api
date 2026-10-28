@@ -11,13 +11,55 @@ function deviceVariableQuery(): array
     return app(Balena::class)->devices()->withVariables()->toQuery();
 }
 
-it('expands the environment, config and service variables', function () {
+it('expands the environment and config variables and the service installs', function () {
     $expand = (string) deviceVariableQuery()['$expand'];
 
     expect($expand)
         ->toContain('device_environment_variable($select=id,name,value)')
         ->toContain('device_config_variable($select=id,name,value)')
-        ->toContain('device_service_environment_variable($select=id,name,value;$expand=service($select=id,service_name))');
+        ->toContain('service_install($select=id;$expand=installs__service($select=id,service_name),device_service_environment_variable($select=id,name,value))');
+});
+
+/**
+ * The relations an $expand asks for at the top level, ignoring whatever is
+ * nested inside their own parentheses.
+ *
+ * @return list<string>
+ */
+function topLevelExpands(string $expand): array
+{
+    $names = [];
+    $current = '';
+    $depth = 0;
+
+    foreach (str_split($expand) as $character) {
+        if ($character === ',' && $depth === 0) {
+            $names[] = $current;
+            $current = '';
+
+            continue;
+        }
+
+        $depth += match ($character) {
+            '(' => 1,
+            ')' => -1,
+            default => 0,
+        };
+
+        $current .= $character;
+    }
+
+    $names[] = $current;
+
+    return array_map(fn (string $name): string => explode('(', $name)[0], $names);
+}
+
+it('never expands service variables straight off the device', function () {
+    // balena has no such relation: service variables belong to a service
+    // install. An unknown navigation comes back as a 401 with an empty body
+    // rather than a 400, so this regression reads like a bad token.
+    expect(topLevelExpands((string) deviceVariableQuery()['$expand']))
+        ->toBe(['device_environment_variable', 'device_config_variable', 'service_install']);
 });
 
 it('includes the variables in withDetails() alongside the releases and tags', function () {
@@ -27,7 +69,7 @@ it('includes the variables in withDetails() alongside the releases and tags', fu
         ->toContain('device_tag($select=tag_key,value)')
         ->toContain('device_environment_variable($select=')
         ->toContain('device_config_variable($select=')
-        ->toContain('device_service_environment_variable($select=');
+        ->toContain('service_install($select=');
 });
 
 it('leaves the device fields unselected when only variables were asked for', function () {
@@ -54,13 +96,25 @@ it('reads environment and config variables as name-value maps', function () {
         ->and($device->configVariables())->toHaveCount(1);
 });
 
-it('keys service variables by service name when the service was expanded', function () {
+it('keys service variables by service name when the install carries one', function () {
     $device = Device::fromArray([
         'uuid' => 'abc',
-        'device_service_environment_variable' => [
-            ['name' => 'BROKER_URL', 'value' => 'tcp://localhost', 'service' => [['id' => 7, 'service_name' => 'mqtt']]],
-            ['name' => 'QOS', 'value' => '1', 'service' => [['id' => 7, 'service_name' => 'mqtt']]],
-            ['name' => 'PORT', 'value' => '8080', 'service' => [['id' => 9, 'service_name' => 'api']]],
+        'service_install' => [
+            [
+                'id' => 1,
+                'installs__service' => [['id' => 7, 'service_name' => 'mqtt']],
+                'device_service_environment_variable' => [
+                    ['name' => 'BROKER_URL', 'value' => 'tcp://localhost'],
+                    ['name' => 'QOS', 'value' => '1'],
+                ],
+            ],
+            [
+                'id' => 2,
+                'installs__service' => [['id' => 9, 'service_name' => 'api']],
+                'device_service_environment_variable' => [
+                    ['name' => 'PORT', 'value' => '8080'],
+                ],
+            ],
         ],
     ]);
 
@@ -72,14 +126,30 @@ it('keys service variables by service name when the service was expanded', funct
         ->and($device->serviceVariable('api', 'QOS'))->toBeNull();
 });
 
-it('falls back to the service id when the service link was not expanded', function () {
+it('falls back to the service id when installs__service was not expanded', function () {
     $device = Device::fromArray([
-        'device_service_environment_variable' => [
-            ['name' => 'PORT', 'value' => '8080', 'service' => ['__id' => 9]],
+        'service_install' => [
+            [
+                'id' => 1,
+                'installs__service' => ['__id' => 9],
+                'device_service_environment_variable' => [
+                    ['name' => 'PORT', 'value' => '8080'],
+                ],
+            ],
         ],
     ]);
 
-    expect($device->serviceVariables())->toBe(['9' => ['PORT' => '8080']]);
+    expect($device->serviceVariables())->toBe([9 => ['PORT' => '8080']]);
+});
+
+it('skips a service install that carries no variables', function () {
+    $device = Device::fromArray([
+        'service_install' => [
+            ['id' => 1, 'installs__service' => [['id' => 7, 'service_name' => 'idle']]],
+        ],
+    ]);
+
+    expect($device->serviceVariables())->toBe([]);
 });
 
 it('reports no variables when the relations were not expanded', function () {
